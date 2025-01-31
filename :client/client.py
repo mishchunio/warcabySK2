@@ -164,11 +164,23 @@ class CheckersClient:
                 print("⚠ Błąd: Nieprawidłowy format MOVE_UPDATE")
                 return
 
-            _, fromX, fromY, toX, toY = parts
+            _, fromX, fromY, toX, toY = parts[:5]
             fromX, fromY, toX, toY = int(fromX), int(fromY), int(toX), int(toY)
 
             print(f"\n🔹 Ruch wykonany: ({fromX}, {fromY}) -> ({toX}, {toY})")
 
+            # Sprawdzamy czy to było bicie
+            if len(parts) > 5 and parts[5] == "CAPTURE":
+                captureX, captureY = int(parts[6]), int(parts[7])
+                
+                # Konwertujemy współrzędne zbitego pionka do lokalnej perspektywy
+                local_captureX, local_captureY = self.convert_coordinates(captureX, captureY)
+                
+                # Usuwamy zbity pionek
+                print(f"🎯 Zbity pionek na pozycji: ({local_captureX}, {local_captureY})")
+                self.board[local_captureX][local_captureY].configure(text="")
+
+            # Aktualizujemy pozycję pionka który wykonał ruch
             self.root.after(0, lambda: self.update_board(fromX, fromY, toX, toY))
 
         elif command == "YOUR_TURN":
