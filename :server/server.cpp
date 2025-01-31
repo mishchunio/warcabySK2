@@ -11,6 +11,9 @@
 #include <mutex>
 #include <iostream>
 #include <sstream>
+#include <set>
+#include <queue>
+
 
 class Game {
 private:
@@ -20,7 +23,7 @@ private:
        WHITE_PIECE = 1,
        BLACK_PIECE = 2
    };
-
+   std::string gameId;
    int whiteCount = 12;
    int blackCount = 12;
    std::vector<std::vector<int>> board;
@@ -29,26 +32,39 @@ private:
 
    void initializeBoard();
 
-
 public:
     Game(const std::string& p1, const std::string& p2);
+    bool checkGameEnd();
+    void setCurrentPlayer(int player);
+    void printBoard();
+    std::string getBoardState() const;
+    std::vector<std::pair<int, int>> getAvailableCaptures(int x, int y, bool isWhite);
+    std::vector<std::pair<int, int>> getAllAvailableCaptures(bool isWhite);
     bool isValidMove(int fromX, int fromY, int toX, int toY, bool isWhite);
     void makeMove(int fromX, int fromY, int toX, int toY);
     int getCurrentPlayer() const;
     std::string getOpponent(const std::string& player);
     std::string getPlayer1() const;
-    void printBoard();
-    std::string getBoardState() const;
-    std::vector<std::pair<int, int>> getAvailableCaptures(int x, int y, bool isWhite);
-    std::vector<std::pair<int, int>> getAllAvailableCaptures(bool isWhite);
-    void setCurrentPlayer(int player);
-    
 };
 
+
 Game::Game(const std::string& p1, const std::string& p2)
-    : board(BOARD_SIZE, std::vector<int>(BOARD_SIZE, EMPTY)),
+    : gameId(p1 + "_vs_" + p2),  // Inicjalizacja gameId
+      board(BOARD_SIZE, std::vector<int>(BOARD_SIZE, EMPTY)),
       player1(p1), player2(p2), currentPlayer(1) {
     initializeBoard();
+}
+
+bool Game::checkGameEnd() {
+    if (whiteCount == 0) {
+        std::cout << "Gra zakończona: Czarny wygrywa!" << std::endl;
+        return true;
+    }
+    if (blackCount == 0) {
+        std::cout << "Gra zakończona: Biały wygrywa!" << std::endl;
+        return true;
+    }
+    return false;
 }
 
 void Game::setCurrentPlayer(int player) {
@@ -251,6 +267,10 @@ void Game::makeMove(int fromX, int fromY, int toX, int toY) {
     }
     
     printBoard();
+
+    if (checkGameEnd()) {
+        return;
+    }
 }
 
 int Game::getCurrentPlayer() const {
@@ -270,8 +290,16 @@ private:
     int serverSocket;
     std::map<std::string, int> connectedPlayers;
     std::map<std::string, Game*> activeGames;
+    std::map<std::string, std::string> playerToGameId;
+    std::map<std::string, std::set<std::string>> gamePlayerMap;
     std::map<std::string, bool> playerMultiCaptureMode;
     std::mutex playersMutex, gamesMutex;
+    std::queue<std::string> waitingPlayers;
+
+    std::string generateGameId(const std::string& player1, const std::string& player2) {
+        return player1 + "_vs_" + player2 + "_" + 
+               std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    }
 
 public:
     GameServer(int port);
@@ -283,10 +311,53 @@ private:
     void processCommand(const std::string& cmd, int clientSocket, std::string& playerName);
     void sendMessage(const std::string& player, const std::string& message);
     void removePlayer(const std::string& playerName);
+    
+    void createGame(const std::string& player1, const std::string& player2);
+    void removeGame(const std::string& gameId);
 };
 
 GameServer::GameServer(int port) {
     setupServer(port);
+}
+
+void GameServer::createGame(const std::string& player1, const std::string& player2) {
+    std::string gameId = generateGameId(player1, player2);
+    Game* game = new Game(player1, player2);
+    
+    {
+        std::lock_guard<std::mutex> lock(gamesMutex);
+        activeGames[gameId] = game;
+        gamePlayerMap[gameId] = {player1, player2};
+    }
+
+    // Wysyłanie wiadomości inicjalizacyjnych
+    std::string msg;
+    
+    msg = "COLOR white\n";
+    send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+    
+    msg = "COLOR black\n";
+    send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+    
+    msg = "GAME_START\n";
+    send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+    send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+    
+    msg = "YOUR_TURN\n";
+    send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+    
+    msg = "WAIT_TURN\n";
+    send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+}
+
+void GameServer::removeGame(const std::string& gameId) {
+    std::lock_guard<std::mutex> lock(gamesMutex);
+    auto gameIt = activeGames.find(gameId);
+    if (gameIt != activeGames.end()) {
+        delete gameIt->second;
+        activeGames.erase(gameId);
+        gamePlayerMap.erase(gameId);
+    }
 }
 
 void GameServer::setupServer(int port) {
@@ -361,65 +432,84 @@ void GameServer::processCommand(const std::string& cmd, int clientSocket, std::s
    std::cout << "\nOtrzymano komendę: " << cmd << std::endl;
 
    if (command == "CONNECT") {
-       ss >> playerName;
-       {
-           std::lock_guard<std::mutex> lock(playersMutex);
-           connectedPlayers[playerName] = clientSocket;
-           std::cout << "Gracz połączony: " << playerName << std::endl;
+    ss >> playerName;
+    
+    {
+        std::lock_guard<std::mutex> lock(playersMutex);
+        connectedPlayers[playerName] = clientSocket;
+        std::cout << "Gracz połączony: " << playerName << std::endl;
 
-           if (connectedPlayers.size() % 2 == 0) {
-               auto it = connectedPlayers.begin();
-               std::string player1 = it->first;
-               std::string player2 = (++it)->first;
+        waitingPlayers.push(playerName);  // Dodaj gracza do kolejki
 
-               std::cout << "Rozpoczynanie gry: " << player1 << " vs " << player2 << std::endl;
+        if (waitingPlayers.size() >= 2) {  // Jeśli są co najmniej dwaj gracze, rozpoczynamy grę
+            std::string player1 = waitingPlayers.front(); waitingPlayers.pop();
+            std::string player2 = waitingPlayers.front(); waitingPlayers.pop();
 
-               Game* game = new Game(player1, player2);
-               
-               {
-                   std::lock_guard<std::mutex> gamesLock(gamesMutex);
-                   activeGames[player1] = game;
-                   activeGames[player2] = game;
-               }
+            std::string gameId = player1 + "_vs_" + player2;  // Klucz gry w activeGames
+            std::cout << "Rozpoczynanie gry: " << player1 << " vs " << player2 << std::endl;
 
-               std::string msg;
-               
-               msg = "COLOR white\n";
-               send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
-               std::cout << "Wysłano do " << player1 << ": COLOR white" << std::endl;
-               
-               msg = "COLOR black\n";
-               send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
-               std::cout << "Wysłano do " << player2 << ": COLOR black" << std::endl;
-               
-               msg = "GAME_START\n";
-               send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
-               send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
-               std::cout << "Wysłano GAME_START do obu graczy" << std::endl;
-               
-               msg = "YOUR_TURN\n";
-               send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
-               std::cout << "Wysłano YOUR_TURN do " << player1 << std::endl;
-               
-               msg = "WAIT_TURN\n";
-               send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
-               std::cout << "Wysłano WAIT_TURN do " << player2 << std::endl;
 
-               std::cout << "Wszystkie wiadomości inicjalizacyjne zostały wysłane" << std::endl;
-           }
-       }
-   }
+            Game* game = new Game(player1, player2);
+            
+            {
+                std::lock_guard<std::mutex> gamesLock(gamesMutex);
+                activeGames[gameId] = game;
+                gamePlayerMap[gameId] = {player1, player2};
+                playerToGameId[player1] = gameId;  // Dodaj graczy do mapy playerToGameId
+                playerToGameId[player2] = gameId;
+            }
+
+            std::string msg;
+            
+            msg = "COLOR white\n";
+            send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+            std::cout << "Wysłano do " << player1 << ": COLOR white" << std::endl;
+            
+            msg = "COLOR black\n";
+            send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+            std::cout << "Wysłano do " << player2 << ": COLOR black" << std::endl;
+            
+            msg = "GAME_START\n";
+            send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+            send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+            std::cout << "Wysłano GAME_START do obu graczy" << std::endl;
+            
+            msg = "YOUR_TURN\n";
+            send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+            std::cout << "Wysłano YOUR_TURN do " << player1 << std::endl;
+            
+            msg = "WAIT_TURN\n";
+            send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+            std::cout << "Wysłano WAIT_TURN do " << player2 << std::endl;
+
+            std::cout << "Wszystkie wiadomości inicjalizacyjne zostały wysłane" << std::endl;
+        }
+    }
+}
+
    else if (command == "MOVE") {
-       int fromX, fromY, toX, toY;
-       ss >> fromX >> fromY >> toX >> toY;
-       
-       std::cout << "Próba ruchu: " << playerName << " (" << fromX << "," 
-                 << fromY << ") -> (" << toX << "," << toY << ")" << std::endl;
-       
-       std::lock_guard<std::mutex> lock(gamesMutex);
-       auto gameIt = activeGames.find(playerName);
-       if (gameIt != activeGames.end()) {
-           Game* game = gameIt->second;
+        int fromX, fromY, toX, toY;
+        ss >> fromX >> fromY >> toX >> toY;
+
+        std::cout << "Próba ruchu: " << playerName << " (" << fromX << "," << fromY 
+                << ") -> (" << toX << "," << toY << ")" << std::endl;
+
+        std::lock_guard<std::mutex> lock(gamesMutex);
+        
+        // Pobierz gameId na podstawie gracza
+        auto gameIdIt = playerToGameId.find(playerName);
+        if (gameIdIt == playerToGameId.end()) {
+            std::cout << "Błąd: Gracz " << playerName << " nie ma przypisanej gry!" << std::endl;
+            sendMessage(playerName, "NO_GAME_FOUND");
+            return;
+        }
+
+        std::string gameId = gameIdIt->second;
+        
+        auto gameIt = activeGames.find(gameId);
+        if (gameIt != activeGames.end()) {
+            Game* game = gameIt->second;
+
            
            bool isWhite = (playerName == game->getPlayer1());
            std::cout << "isWhite: " << isWhite << ", currentPlayer: " 
@@ -488,10 +578,17 @@ void GameServer::processCommand(const std::string& cmd, int clientSocket, std::s
                        
                        sendMessage(playerName, "WAIT_TURN");
                        sendMessage(game->getOpponent(playerName), "YOUR_TURN");
+
+                       
                    }
                } else {
                    std::cout << "Nieprawidłowy ruch!" << std::endl;
                    sendMessage(playerName, "INVALID_MOVE");
+               }
+               if (game->checkGameEnd()) {
+                   sendMessage(playerName, "GAME_OVER");
+                   sendMessage(game->getOpponent(playerName), "GAME_OVER");
+                   return;
                }
            } else {
                std::cout << "Nie twoja kolej!" << std::endl;
