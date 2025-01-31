@@ -14,18 +14,21 @@
 
 class Game {
 private:
-    enum {
-        BOARD_SIZE = 8,
-        EMPTY = 0,
-        WHITE_PIECE = 1,
-        BLACK_PIECE = 2
-    };
+   enum {
+       BOARD_SIZE = 8,
+       EMPTY = 0,
+       WHITE_PIECE = 1,
+       BLACK_PIECE = 2
+   };
 
-    std::vector<std::vector<int>> board;
-    int currentPlayer;
-    std::string player1, player2;
+   int whiteCount = 12;
+   int blackCount = 12;
+   std::vector<std::vector<int>> board;
+   int currentPlayer;
+   std::string player1, player2;
 
-    void initializeBoard();
+   void initializeBoard();
+
 
 public:
     Game(const std::string& p1, const std::string& p2);
@@ -36,12 +39,20 @@ public:
     std::string getPlayer1() const;
     void printBoard();
     std::string getBoardState() const;
+    std::vector<std::pair<int, int>> getAvailableCaptures(int x, int y, bool isWhite);
+    std::vector<std::pair<int, int>> getAllAvailableCaptures(bool isWhite);
+    void setCurrentPlayer(int player);
+    
 };
 
 Game::Game(const std::string& p1, const std::string& p2)
     : board(BOARD_SIZE, std::vector<int>(BOARD_SIZE, EMPTY)),
       player1(p1), player2(p2), currentPlayer(1) {
     initializeBoard();
+}
+
+void Game::setCurrentPlayer(int player) {
+    currentPlayer = player;
 }
 
 void Game::initializeBoard() {
@@ -61,6 +72,7 @@ void Game::initializeBoard() {
         }
     }
 }
+
 
 void Game::printBoard() {
     std::cout << "\nAktualna plansza:\n";
@@ -84,7 +96,58 @@ std::string Game::getBoardState() const {
     return ss.str();
 }
 
+std::vector<std::pair<int, int>> Game::getAvailableCaptures(int x, int y, bool isWhite) {
+    std::vector<std::pair<int, int>> captures;
+    
+    // Sprawdzamy wszystkie możliwe kierunki bicia
+    std::vector<std::pair<int, int>> directions = {{-2, -2}, {-2, 2}, {2, -2}, {2, 2}};
+    
+    for (const auto& dir : directions) {
+        int newX = x + dir.first;
+        int newY = y + dir.second;
+        int midX = x + dir.first/2;
+        int midY = y + dir.second/2;
+        
+        // Sprawdź czy bicie jest w granicach planszy
+        if (newX >= 0 && newX < BOARD_SIZE && newY >= 0 && newY < BOARD_SIZE) {
+            // Sprawdź czy pole docelowe jest puste
+            if (board[newX][newY] == EMPTY) {
+                // Sprawdź czy na polu pośrednim jest pionek przeciwnika
+                int midPiece = board[midX][midY];
+                if ((isWhite && midPiece == WHITE_PIECE) || (!isWhite && midPiece == BLACK_PIECE)) {
+                    captures.push_back({newX, newY});
+                }
+            }
+        }
+    }
+    
+    return captures;
+}
+
+std::vector<std::pair<int, int>> Game::getAllAvailableCaptures(bool isWhite) {
+    std::vector<std::pair<int, int>> allCaptures;
+    
+    // Sprawdzamy całą planszę w poszukiwaniu pionków danego gracza
+    for (int x = 0; x < BOARD_SIZE; x++) {
+        for (int y = 0; y < BOARD_SIZE; y++) {
+            int piece = board[x][y];
+            if ((isWhite && piece == BLACK_PIECE) || (!isWhite && piece == WHITE_PIECE)) {
+                auto captures = getAvailableCaptures(x, y, isWhite);
+                if (!captures.empty()) {
+                    allCaptures.push_back({x, y}); // Dodajemy pozycję pionka, który może wykonać bicie
+                }
+            }
+        }
+    }
+    
+    return allCaptures;
+}
+
+
+
+
 bool Game::isValidMove(int fromX, int fromY, int toX, int toY, bool isWhite) {
+    // Podstawowe sprawdzenia granic planszy
     if (fromX < 0 || fromX >= BOARD_SIZE || fromY < 0 || fromY >= BOARD_SIZE ||
         toX < 0 || toX >= BOARD_SIZE || toY < 0 || toY >= BOARD_SIZE) {
         std::cout << "Błąd: Ruch poza planszą" << std::endl;
@@ -108,12 +171,50 @@ bool Game::isValidMove(int fromX, int fromY, int toX, int toY, bool isWhite) {
         return false;
     }
 
+    // Najpierw sprawdzamy czy są jakiekolwiek dostępne bicia na planszy
+    auto allCaptures = getAllAvailableCaptures(isWhite);
+    
+    if (!allCaptures.empty()) {
+        // Jest przynajmniej jedno możliwe bicie na planszy
+        
+        // Sprawdź czy wybrany pionek jest jednym z tych, które mogą wykonać bicie
+        bool isCapturingPiece = false;
+        for (const auto& pos : allCaptures) {
+            if (pos.first == fromX && pos.second == fromY) {
+                isCapturingPiece = true;
+                break;
+            }
+        }
+        
+        if (!isCapturingPiece) {
+            std::cout << "Błąd: Musisz wykonać bicie innym pionkiem" << std::endl;
+            return false;
+        }
+
+        // Sprawdzamy czy wykonywany ruch jest biciem
+        auto possibleCaptures = getAvailableCaptures(fromX, fromY, isWhite);
+        bool isValidCapture = false;
+        for (const auto& capture : possibleCaptures) {
+            if (capture.first == toX && capture.second == toY) {
+                isValidCapture = true;
+                break;
+            }
+        }
+        
+        if (!isValidCapture) {
+            std::cout << "Błąd: Musisz wykonać bicie tym pionkiem" << std::endl;
+            return false;
+        }
+
+        return true;
+    }
+    
+    // Jeśli nie ma żadnych bić na planszy, sprawdzamy zwykły ruch
     int dx = toX - fromX;
     int dy = toY - fromY;
 
     if (abs(dx) != 1 || abs(dy) != 1) {
-        std::cout << "Błąd: Nieprawidłowy dystans ruchu (dx=" << dx 
-                  << ", dy=" << dy << ")" << std::endl;
+        std::cout << "Błąd: Nieprawidłowy dystans ruchu" << std::endl;
         return false;
     }
 
@@ -132,12 +233,23 @@ bool Game::isValidMove(int fromX, int fromY, int toX, int toY, bool isWhite) {
 }
 
 void Game::makeMove(int fromX, int fromY, int toX, int toY) {
-    std::cout << "Wykonywanie ruchu z (" << fromX << "," << fromY << ") na (" 
+    std::cout << "Wykonywanie ruchu z (" << fromX << "," << fromY << ") na ("
               << toX << "," << toY << ")" << std::endl;
     
+    // Wykonujemy ruch
     board[toX][toY] = board[fromX][fromY];
     board[fromX][fromY] = EMPTY;
-    currentPlayer = (currentPlayer == 1) ? 2 : 1;
+    
+    bool isCapture = (abs(toX - fromX) == 2);
+    
+    if (isCapture) {
+        // Usuwamy zbity pionek
+        int midX = (fromX + toX) / 2;
+        int midY = (fromY + toY) / 2;
+        board[midX][midY] = EMPTY;
+        std::cout << "Zbito pionek na pozycji (" << midX << "," << midY << ")" << std::endl;
+    }
+    
     printBoard();
 }
 
@@ -158,6 +270,7 @@ private:
     int serverSocket;
     std::map<std::string, int> connectedPlayers;
     std::map<std::string, Game*> activeGames;
+    std::map<std::string, bool> playerMultiCaptureMode;
     std::mutex playersMutex, gamesMutex;
 
 public:
@@ -209,7 +322,8 @@ void GameServer::sendMessage(const std::string& player, const std::string& messa
     auto it = connectedPlayers.find(player);
     if (it != connectedPlayers.end()) {
         int clientSocket = it->second;
-        send(clientSocket, message.c_str(), message.length(), 0);
+        std::string msg = message + "\n";
+        send(clientSocket, msg.c_str(), msg.length(), 0);
         std::cout << "Wysłano do " << player << ": " << message << std::endl;
     }
 }
@@ -240,102 +354,151 @@ void GameServer::removePlayer(const std::string& playerName) {
 }
 
 void GameServer::processCommand(const std::string& cmd, int clientSocket, std::string& playerName) {
-    std::istringstream ss(cmd);
-    std::string command;
-    ss >> command;
+   std::istringstream ss(cmd);
+   std::string command;
+   ss >> command;
 
-    std::cout << "\nOtrzymano komendę: " << cmd << std::endl;
+   std::cout << "\nOtrzymano komendę: " << cmd << std::endl;
 
-    if (command == "CONNECT") {
-        ss >> playerName;
-        {
-            std::lock_guard<std::mutex> lock(playersMutex);
-            connectedPlayers[playerName] = clientSocket;
-            std::cout << "Gracz połączony: " << playerName << std::endl;
+   if (command == "CONNECT") {
+       ss >> playerName;
+       {
+           std::lock_guard<std::mutex> lock(playersMutex);
+           connectedPlayers[playerName] = clientSocket;
+           std::cout << "Gracz połączony: " << playerName << std::endl;
 
-            if (connectedPlayers.size() % 2 == 0) {
-                auto it = connectedPlayers.begin();
-                std::string player1 = it->first;
-                std::string player2 = (++it)->first;
+           if (connectedPlayers.size() % 2 == 0) {
+               auto it = connectedPlayers.begin();
+               std::string player1 = it->first;
+               std::string player2 = (++it)->first;
 
-                std::cout << "Rozpoczynanie gry: " << player1 << " vs " << player2 << std::endl;
+               std::cout << "Rozpoczynanie gry: " << player1 << " vs " << player2 << std::endl;
 
-                Game* game = new Game(player1, player2);
-                
-                {
-                    std::lock_guard<std::mutex> gamesLock(gamesMutex);
-                    activeGames[player1] = game;
-                    activeGames[player2] = game;
-                }
+               Game* game = new Game(player1, player2);
+               
+               {
+                   std::lock_guard<std::mutex> gamesLock(gamesMutex);
+                   activeGames[player1] = game;
+                   activeGames[player2] = game;
+               }
 
-                // Dodajemy znaki końca linii do każdej wiadomości
-                std::string msg;
-                
-                msg = "COLOR white\n";
-                send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
-                std::cout << "Wysłano do " << player1 << ": " << msg;
+               std::string msg;
+               
+               msg = "COLOR white\n";
+               send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+               std::cout << "Wysłano do " << player1 << ": COLOR white" << std::endl;
+               
+               msg = "COLOR black\n";
+               send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+               std::cout << "Wysłano do " << player2 << ": COLOR black" << std::endl;
+               
+               msg = "GAME_START\n";
+               send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+               send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+               std::cout << "Wysłano GAME_START do obu graczy" << std::endl;
+               
+               msg = "YOUR_TURN\n";
+               send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
+               std::cout << "Wysłano YOUR_TURN do " << player1 << std::endl;
+               
+               msg = "WAIT_TURN\n";
+               send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
+               std::cout << "Wysłano WAIT_TURN do " << player2 << std::endl;
 
-                msg = "COLOR black\n";
-                send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
-                std::cout << "Wysłano do " << player2 << ": " << msg;
+               std::cout << "Wszystkie wiadomości inicjalizacyjne zostały wysłane" << std::endl;
+           }
+       }
+   }
+   else if (command == "MOVE") {
+       int fromX, fromY, toX, toY;
+       ss >> fromX >> fromY >> toX >> toY;
+       
+       std::cout << "Próba ruchu: " << playerName << " (" << fromX << "," 
+                 << fromY << ") -> (" << toX << "," << toY << ")" << std::endl;
+       
+       std::lock_guard<std::mutex> lock(gamesMutex);
+       auto gameIt = activeGames.find(playerName);
+       if (gameIt != activeGames.end()) {
+           Game* game = gameIt->second;
+           
+           bool isWhite = (playerName == game->getPlayer1());
+           std::cout << "isWhite: " << isWhite << ", currentPlayer: " 
+                     << game->getCurrentPlayer() << std::endl;
 
-                msg = "GAME_START\n";
-                send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
-                send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
-                std::cout << "Wysłano GAME_START do obu graczy\n";
+           // Dodatkowe sprawdzenie wielokrotnych bić
+           auto allCaptures = game->getAllAvailableCaptures(isWhite);
+           
+           if (game->getCurrentPlayer() == (isWhite ? 1 : 2)) {
+               // Jeśli są dostępne bicia, gracz musi wykonać bicie
+               if (!allCaptures.empty()) {
+                   auto currentCaptures = game->getAvailableCaptures(fromX, fromY, isWhite);
+                   
+                   if (currentCaptures.empty()) {
+                       std::cout << "Musisz wykonać bicie innym pionkiem!" << std::endl;
+                       sendMessage(playerName, "INVALID_MOVE");
+                       return;
+                   }
+               }
 
-                msg = "YOUR_TURN\n";
-                send(connectedPlayers[player1], msg.c_str(), msg.length(), 0);
-                std::cout << "Wysłano YOUR_TURN do " << player1 << std::endl;
-
-                msg = "WAIT_TURN\n";
-                send(connectedPlayers[player2], msg.c_str(), msg.length(), 0);
-                std::cout << "Wysłano WAIT_TURN do " << player2 << std::endl;
-            }
-        }
-    }
-    else if (command == "MOVE") {
-        int fromX, fromY, toX, toY;
-        ss >> fromX >> fromY >> toX >> toY;
-        
-        std::cout << "Próba ruchu: " << playerName << " (" << fromX << "," 
-                  << fromY << ") -> (" << toX << "," << toY << ")" << std::endl;
-        
-        std::lock_guard<std::mutex> lock(gamesMutex);
-        auto gameIt = activeGames.find(playerName);
-        if (gameIt != activeGames.end()) {
-            Game* game = gameIt->second;
-            
-            bool isWhite = (playerName == game->getPlayer1());
-            std::cout << "isWhite: " << isWhite << ", currentPlayer: " 
-                      << game->getCurrentPlayer() << std::endl;
-
-            if (game->getCurrentPlayer() == (isWhite ? 1 : 2)) {
-                if (game->isValidMove(fromX, fromY, toX, toY, isWhite)) {
-                    std::cout << "Ruch wykonany przez " << playerName << ": " 
-                              << fromX << "," << fromY << " -> " << toX << "," << toY << std::endl;
-                    
-                    game->makeMove(fromX, fromY, toX, toY);
-                    
-                    std::string moveUpdate = "MOVE_UPDATE " + std::to_string(fromX) + " " + 
-                                          std::to_string(fromY) + " " + std::to_string(toX) + " " + 
-                                          std::to_string(toY);
-                    
-                    sendMessage(playerName, moveUpdate);
-                    sendMessage(game->getOpponent(playerName), moveUpdate);
-                    
-                    sendMessage(playerName, "WAIT_TURN");
-                    sendMessage(game->getOpponent(playerName), "YOUR_TURN");
-                } else {
-                    std::cout << "Nieprawidłowy ruch!" << std::endl;
-                    sendMessage(playerName, "INVALID_MOVE");
-                }
-            } else {
-                std::cout << "Nie twoja kolej!" << std::endl;
-                sendMessage(playerName, "NOT_YOUR_TURN");
-            }
-        }
-    }
+               if (game->isValidMove(fromX, fromY, toX, toY, isWhite)) {
+                   std::cout << "Ruch wykonany przez " << playerName << ": " 
+                             << fromX << "," << fromY << " -> " << toX << "," << toY << std::endl;
+                   
+                   bool isCapture = abs(toX - fromX) == 2;
+                   std::string moveUpdate;
+                   
+                   if (isCapture) {
+                       // Wykonaj pojedyncze bicie
+                       int midX = (fromX + toX) / 2;
+                       int midY = (fromY + toY) / 2;
+                       
+                       game->makeMove(fromX, fromY, toX, toY);
+                       
+                       moveUpdate = "MOVE_UPDATE " + std::to_string(fromX) + " " + 
+                                  std::to_string(fromY) + " " + std::to_string(toX) + " " + 
+                                  std::to_string(toY) + " CAPTURE " + std::to_string(midX) + 
+                                  " " + std::to_string(midY);
+                       
+                       sendMessage(playerName, moveUpdate);
+                       sendMessage(game->getOpponent(playerName), moveUpdate);
+                       
+                       // Sprawdź czy są kolejne możliwe bicia dla tego samego pionka
+                       auto nextCaptures = game->getAvailableCaptures(toX, toY, isWhite);
+                       
+                       if (nextCaptures.empty()) {
+                           // Jeśli nie ma kolejnych bić, kończymy turę
+                           game->setCurrentPlayer(isWhite ? 2 : 1);
+                           sendMessage(playerName, "WAIT_TURN");
+                           sendMessage(game->getOpponent(playerName), "YOUR_TURN");
+                       } else {
+                           // Jeśli są kolejne bicia, ten sam gracz musi kontynuować
+                           sendMessage(playerName, "YOUR_TURN");
+                           sendMessage(game->getOpponent(playerName), "WAIT_TURN");
+                       }
+                   } else {
+                       // Zwykły ruch bez bicia
+                       game->makeMove(fromX, fromY, toX, toY);
+                       game->setCurrentPlayer(isWhite ? 2 : 1);
+                       moveUpdate = "MOVE_UPDATE " + std::to_string(fromX) + " " + 
+                                  std::to_string(fromY) + " " + std::to_string(toX) + " " + 
+                                  std::to_string(toY);
+                       
+                       sendMessage(playerName, moveUpdate);
+                       sendMessage(game->getOpponent(playerName), moveUpdate);
+                       
+                       sendMessage(playerName, "WAIT_TURN");
+                       sendMessage(game->getOpponent(playerName), "YOUR_TURN");
+                   }
+               } else {
+                   std::cout << "Nieprawidłowy ruch!" << std::endl;
+                   sendMessage(playerName, "INVALID_MOVE");
+               }
+           } else {
+               std::cout << "Nie twoja kolej!" << std::endl;
+               sendMessage(playerName, "NOT_YOUR_TURN");
+           }
+       }
+   }
 }
 
 void GameServer::handleClient(int clientSocket) {
