@@ -50,7 +50,6 @@ public:
     int getCurrentPlayer() const;
     std::string getOpponent(const std::string& player);
     std::string getPlayer1() const;
-    std::vector<std::pair<int, int>> getKingCaptures(int x, int y, bool isWhite, std::set<std::pair<int, int>>& capturedPieces);
     bool isKingAt(int x, int y);
     std::pair<int, int> getCapturedCoordinatesForKing(int fromX, int fromY, int toX, int toY);
     int getPieceAt(int x, int y);
@@ -413,45 +412,6 @@ std::string Game::getPlayer1() const {
     return player1;
 }
 
-std::vector<std::pair<int, int>> Game::getKingCaptures(int x, int y, bool isWhite, std::set<std::pair<int, int>>& capturedPieces) {
-    std::vector<std::pair<int, int>> possibleMoves;
-    std::vector<std::pair<int, int>> directions = {{-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
-    for (const auto& dir : directions) {
-        int currentX = x + dir.first;
-        int currentY = y + dir.second;
-        while (currentX >= 0 && currentX < BOARD_SIZE && currentY >= 0 && currentY < BOARD_SIZE) {
-            int piece = board[currentX][currentY];
-            if ((isWhite && (piece == WHITE_PIECE || piece == WHITE_KING)) ||
-                (!isWhite && (piece == BLACK_PIECE || piece == BLACK_KING))) {
-                break;
-            }
-            if ((!isWhite && (piece == WHITE_PIECE || piece == WHITE_KING)) ||
-                (isWhite && (piece == BLACK_PIECE || piece == BLACK_KING))) {
-                if (capturedPieces.find({currentX, currentY}) == capturedPieces.end()) {
-                    int nextX = currentX + dir.first;
-                    int nextY = currentY + dir.second;
-                    while (nextX >= 0 && nextX < BOARD_SIZE && nextY >= 0 && nextY < BOARD_SIZE) {
-                        if (board[nextX][nextY] == EMPTY) {
-                            std::set<std::pair<int, int>> newCaptured = capturedPieces;
-                            newCaptured.insert({currentX, currentY});
-                            std::vector<std::pair<int, int>> furtherCaptures = getKingCaptures(nextX, nextY, isWhite, newCaptured);
-                            if (furtherCaptures.empty()) {
-                                possibleMoves.push_back({nextX, nextY});
-                            }
-                            possibleMoves.insert(possibleMoves.end(), furtherCaptures.begin(), furtherCaptures.end());
-                        }
-                        nextX += dir.first;
-                        nextY += dir.second;
-                    }
-                }
-                break;
-            }
-            currentX += dir.first;
-            currentY += dir.second;
-        }
-    }
-    return possibleMoves;
-}
 
 bool Game::isKingAt(int x, int y) {
     int piece = board[x][y];
