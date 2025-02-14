@@ -76,10 +76,12 @@ class CheckersClient:
             return
 
         if self.selected is None:
-            if self.board[x][y].cget("text") == self.my_pieces:
+            current_text = self.board[x][y].cget("text")
+            if current_text == self.my_pieces or current_text == self.my_king:
                 self.selected = (x, y)
                 self.board[x][y].configure(bg="yellow")
             return
+
 
         if self.selected:
             # Konwertujemy współrzędne do "normalnej" orientacji przed wysłaniem
@@ -94,13 +96,14 @@ class CheckersClient:
             self.board[self.selected[0]][self.selected[1]].configure(bg=orig_color)
             self.selected = None
 
-    def update_board(self, fromX, fromY, toX, toY):
+    def update_board(self, fromX, fromY, toX, toY, piece=None):
         """Aktualizuje planszę po ruchu."""
-        # Konwertujemy współrzędne do lokalnej perspektywy
         local_fromX, local_fromY = self.convert_coordinates(fromX, fromY)
         local_toX, local_toY = self.convert_coordinates(toX, toY)
-        
-        piece = self.board[local_fromX][local_fromY].cget("text")
+
+        if piece is None:
+            piece = self.board[local_fromX][local_fromY].cget("text")
+
         self.board[local_fromX][local_fromY].configure(text="")
         self.board[local_toX][local_toY].configure(text=piece)
 
@@ -145,9 +148,15 @@ class CheckersClient:
             if self.player_color == "white":
                 self.my_pieces = "●"
                 self.opponent_pieces = "○"
+                self.my_king = "♚"
+                self.opponent_king = "♔"
+                
             else:
                 self.my_pieces = "○"
                 self.opponent_pieces = "●"
+                self.my_king = "♔"
+                self.opponent_king = "♚"
+                
 
             print(f"🔹 Twój kolor: {self.player_color} (Twoje pionki: {self.my_pieces})")
             self.root.after(0, self.setup_initial_pieces)
@@ -172,21 +181,29 @@ class CheckersClient:
             # Sprawdzamy czy to było bicie
             if len(parts) > 5 and parts[5] == "CAPTURE":
                 captureX, captureY = int(parts[6]), int(parts[7])
-                
-                # Konwertujemy współrzędne zbitego pionka do lokalnej perspektywy
                 local_captureX, local_captureY = self.convert_coordinates(captureX, captureY)
-                
-                # Usuwamy zbity pionek
                 print(f"🎯 Zbity pionek na pozycji: ({local_captureX}, {local_captureY})")
                 self.board[local_captureX][local_captureY].configure(text="")
 
-            # Aktualizujemy pozycję pionka który wykonał ruch
-            self.root.after(0, lambda: self.update_board(fromX, fromY, toX, toY))
+            # Ustalamy jaki pionek będzie na polu docelowym
+            if len(parts) > 8 and parts[8] == "KING":
+                new_piece = self.my_king if self.is_my_turn else self.opponent_king
+            else:
+                local_fromX, local_fromY = self.convert_coordinates(fromX, fromY)
+                current_piece = self.board[local_fromX][local_fromY].cget("text")
+                if current_piece in ["♕", "♛"]:  # jeśli to już była damka
+                    new_piece = current_piece  # zachowujemy tę samą damkę
+                else:
+                    new_piece = self.my_pieces if self.is_my_turn else self.opponent_pieces
+
+            # Aktualizujemy pozycję pionka
+            self.root.after(0, lambda: self.update_board(fromX, fromY, toX, toY, new_piece))
+
 
         elif command == "YOUR_TURN":
             self.is_my_turn = True
             print("▶ Teraz twoja kolej!")
-            self.root.after(0, lambda: messagebox.showinfo("Gra", "Twoja kolej!"))
+            
 
         elif command == "WAIT_TURN":
             self.is_my_turn = False
@@ -199,6 +216,17 @@ class CheckersClient:
         elif command == "NOT_YOUR_TURN":
             print("⚠ To nie jest twoja kolej!")
             self.root.after(0, lambda: messagebox.showinfo("Gra", "Teraz nie twoja kolej!"))
+
+        elif command == "GAME_OVER":
+            if len(parts) > 1:
+                winner = parts[1]
+                messagebox.showinfo("Gra", f"Gra zakończona! Wygrał: {winner}")
+            else:
+                messagebox.showinfo("Gra", "Gra zakończona!")
+
+        elif command == "OPPONENT_DISCONNECTED":
+            messagebox.showinfo("Połączenie z przeciwnikiem zostało utracone")
+
 
     def run(self):
         """Uruchamia główną pętlę Tkintera."""
